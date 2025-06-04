@@ -1,20 +1,43 @@
-const { Low, JSONFile } = require('lowdb');
-const adapter = new JSONFile('db.json');
-const db = new Low(adapter);
+const fs = require('fs');
+const path = require('path');
 
-async function initDB() {
-    await db.read();
-    db.data ||= { users: {} };
-    await db.write();
+const DB_PATH = path.join(__dirname, 'users.json');
+
+let users = {};
+
+// Загружаем при старте
+try {
+    if (fs.existsSync(DB_PATH)) {
+        const raw = fs.readFileSync(DB_PATH);
+        users = JSON.parse(raw);
+    }
+} catch (e) {
+    console.error('Ошибка загрузки базы данных:', e);
 }
 
-async function saveUser(id, data) {
-    db.data.users[id] = { ...(db.data.users[id] || {}), ...data };
-    await db.write();
+// Сохраняем в файл
+function saveDB() {
+    fs.writeFileSync(DB_PATH, JSON.stringify(users, null, 2));
 }
 
-function getUser(id) {
-    return db.data.users[id];
+function getUser(userId) {
+    return users[userId];
 }
 
-module.exports = { initDB, saveUser, getUser };
+function getAllUsers() {
+    return users;
+}
+
+async function saveUser(userId, data) {
+    users[userId] = {
+        ...users[userId],
+        ...data,
+    };
+    saveDB();
+}
+
+module.exports = {
+    getUser,
+    saveUser,
+    getAllUsers,
+};

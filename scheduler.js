@@ -1,17 +1,42 @@
 const cron = require('node-cron');
+const { getAllUsers, saveUser } = require('./db');
 const { drawCards } = require('./tarot');
-const { dailyMessage } = require('./messages');
-const { getUser } = require('./db');
+const { generateOpenAIPrediction, generateFallbackPrediction } = require('./bot'); // Импортируем функции ИИ из bot.js
 
-//TODO добавить ограничение одного запроса в день
 function scheduleDaily(bot) {
     cron.schedule('0 9 * * *', async () => {
-        const users = Object.entries(require('./db.json').users);
-        for (const [id, user] of users) {
-            const cards = drawCards(1);
-            await bot.telegram.sendMessage(id, dailyMessage(cards), { parse_mode: 'Markdown' });
+        const users = getAllUsers();
+        const today = new Date().toISOString().split('T')[0];
+
+        for (const [userId, user] of Object.entries(users)) {
+            if (user.lastDailyReadingDate === today) continue;
+
+            const cards = drawCards(3);
+            const question = 'Что меня ждёт сегодня?';
+
+            let prediction;
+            try {
+                prediction = await generateOpenAIPrediction({
+                    cards,
+                    question,
+                    birthdate: user.birthdate,
+                });
+            } catch {
+                prediction = generateFallbackPrediction({
+                    cards,
+                    question,
+                    birthdate: user.birthdate,
+                });
+            }
+
+            try {
+                await bot.telegram.sendMessage(userId, `☀️ Утренний расклад на день:\n\n${prediction}`);
+                await saveUser(userId, { lastDailyReadingDate: today });
+            } catch (err) {
+                console.error(`Ошибка отправки утреннего расклада пользователю ${userId}:`, err);
+            }
         }
-    });
+    }, { timezone: 'Europe/London' });
 }
 
 module.exports = { scheduleDaily };

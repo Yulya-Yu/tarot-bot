@@ -1,22 +1,16 @@
-const { OpenAI } = require("openai");
+function generateMysticPrediction({ cards, question, birthdate }) {
+    const affirmations = [
+        "Ты заслуживаешь покоя и ясности.",
+        "Сегодня твоя душа раскроется навстречу свету.",
+        "Будущее открыто перед тобой — просто сделай шаг.",
+        "Ты сильнее, чем кажешься, и мудрее, чем думаешь.",
+    ];
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const intro = `✨ Твоя душа задала вопрос: *${question}*.\nКарты выбраны с учётом твоего пути.\n`;
+    const cardLines = cards.map(card => `🃏 *${card.name}*: ${card.meaning}`).join('\n');
+    const affirmation = affirmations[Math.floor(Math.random() * affirmations.length)];
 
-async function generateMysticPrediction({ cards, question, birthdate }) {
-    const prompt = `
-Ты — мистический советник, создающий уникальные позитивные предсказания по раскладам Таро. Твой стиль: туманный, поэтичный, эзотерический. Пользователь родился ${birthdate}. Его вопрос: "${question}". Ему выпали карты: ${cards.map(c => c.name).join(', ')}.
-
-Составь развернутое и вдохновляющее послание, в котором упоминается символика этих карт, мягко направляя человека к самопознанию, принятию и внутреннему покою.
-  `;
-
-    const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini", // Или gpt-4o
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.9,
-        max_tokens: 400,
-    });
-
-    return response.choices[0].message.content;
+    return `${intro}\n${cardLines}\n\n🔮 _${affirmation}_`;
 }
 
 module.exports = { generateMysticPrediction };
