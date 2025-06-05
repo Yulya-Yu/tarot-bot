@@ -2,19 +2,17 @@ const { Telegraf, Markup } = require('telegraf');
 const { scheduleDaily } = require('./scheduler');
 const { getUser, saveUser } = require('./db');
 const { drawCards } = require('./tarot');
-const { Configuration, OpenAIApi } = require('openai');
+const { OpenAI } = require('openai');
+const dotenv = require('dotenv');
+dotenv.config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
+const client = new OpenAI({ apiKey: OPENAI_API_KEY, });
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
 if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
 
 const bot = new Telegraf(BOT_TOKEN);
-
-const openai = new OpenAIApi(new Configuration({
-    apiKey: OPENAI_API_KEY,
-}));
 
 const sessions = {};
 
@@ -102,7 +100,7 @@ ${cardsDescription}
 `;
 
     try {
-        const completion = await openai.createChatCompletion({
+        const completion = await client.responses.create({
             model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: systemPrompt },
