@@ -100,7 +100,7 @@ ${cardsDescription}
 `;
 
     try {
-        const completion = await client.responses.create({
+        const completion = await client.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: systemPrompt },
