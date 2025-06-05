@@ -35,9 +35,32 @@ async function saveUser(userId, data) {
     };
     saveDB();
 }
+/**
+ * Проверяет, задавал ли пользователь вопрос сегодня
+ * @param {string|number} userId
+ * @returns {Promise<boolean>}
+ */
+async function alreadyAskedToday(userId) {
+    const user = getUser(userId);
+    if (!user || !user.lastQuestionDate) return false;
 
+    const today = new Date().toISOString().slice(0, 10);
+    return user.lastQuestionDate === today;
+}
+
+/**
+ * Сохраняет дату последнего вопроса пользователя как сегодня
+ * @param {string|number} userId
+ * @returns {Promise<void>}
+ */
+async function saveUserQuestionDate(userId) {
+    const today = new Date().toISOString().slice(0, 10);
+    await saveUser(userId, { lastQuestionDate: today });
+}
 module.exports = {
     getUser,
     saveUser,
     getAllUsers,
+    alreadyAskedToday,
+    saveUserQuestionDate,
 };

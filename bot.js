@@ -1,6 +1,6 @@
 const { Telegraf, Markup } = require('telegraf');
 const { scheduleDaily } = require('./scheduler');
-const { getUser, saveUser } = require('./db');
+const { getUser, saveUser, alreadyAskedToday, saveUserQuestionDate } = require('./db');
 const { drawCards } = require('./tarot');
 const { OpenAI } = require('openai');
 const dotenv = require('dotenv');
@@ -25,7 +25,8 @@ bot.start(async (ctx) => {
 
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
-    const text = ctx.message.text.trim();
+    const chatId = ctx.chat.id;
+    const text = ctx.message.text.trim().slice(0, 200);
     const user = getUser(userId) || {};
 
     if (!sessions[userId]) sessions[userId] = {};
@@ -70,6 +71,12 @@ bot.on('text', async (ctx) => {
         const cards = drawCards(session.cardsCount || 3);
 
         await saveUser(userId, { lastQuestionDate: today });
+        if (await alreadyAskedToday(userId)) {
+            return bot.sendMessage(chatId, "🔒 Сегодня ты уже спрашивал. Попробуй снова завтра.");
+        }
+
+        // Отправим сообщение о том, что идёт генерация
+        await bot.sendMessage(chatId, "🔮 Перемешиваю колоду и призываю силу карт...");
 
         const prediction = await generateOpenAIPrediction({
             cards,
@@ -101,15 +108,23 @@ ${cardsDescription}
 
     try {
         const completion = await client.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: 'gpt-3.5-turbo',
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: 'Сформируй утонченное и позитивное предсказание.' },
             ],
-            max_tokens: 500,
+            max_tokens: 300,
             temperature: 0.8,
         });
-        return completion.data.choices[0].message.content.trim();
+        return completion?.choices[0]?.message?.content.trim();
+
+        // if (answer) {
+        //     await bot.sendMessage(chatId, answer);
+        //     await saveUserQuestionDate(userId); // сохраняем дату
+        // } else {
+        //     await bot.sendMessage(chatId, "😕 Не удалось получить предсказание. Попробуй позже.");
+        // }
+
     } catch (err) {
         console.error('OpenAI error:', err);
         return generateFallbackPrediction({ cards, question, birthdate });
