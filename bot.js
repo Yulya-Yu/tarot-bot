@@ -1,4 +1,5 @@
 const { Telegraf, Markup } = require('telegraf');
+const path = require('path');
 const { scheduleDaily } = require('./scheduler');
 const { getUser, saveUser, alreadyAskedToday, saveUserQuestionDate } = require('./db');
 const { drawCards } = require('./tarot');
@@ -8,21 +9,34 @@ dotenv.config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const client = new OpenAI({ apiKey: OPENAI_API_KEY, });
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
 if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
 
+const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 const bot = new Telegraf(BOT_TOKEN);
 
 const sessions = {};
 
+// Отправка карт с изображениями
+async function sendCards(ctx, cards) {
+    for (const card of cards) {
+        await ctx.telegram.sendPhoto(
+            ctx.chat.id,
+            { source: card.image },
+            { caption: `🃏 ${card.name}: ${card.meaning}` }
+        );
+    }
+}
+
+// Стартовая команда
 bot.start(async (ctx) => {
     await ctx.reply(
-        `Привет! Для начала, пожалуйста, введи свою дату рождения в формате ДД.ММ.ГГГГ.`,
+        `Привет! Для начала, пожалуйста, введи свою дату рождения в формате ДД.ММ.ГГГГ.`
     );
     sessions[ctx.from.id] = { step: 'awaiting_birthdate' };
 });
 
+// Основной обработчик текста
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const chatId = ctx.chat.id;
@@ -30,9 +44,9 @@ bot.on('text', async (ctx) => {
     const user = getUser(userId) || {};
 
     if (!sessions[userId]) sessions[userId] = {};
-
     const session = sessions[userId];
 
+    // Ввод даты рождения
     if (session.step === 'awaiting_birthdate') {
         if (!/^\d{2}\.\d{2}\.\d{4}$/.test(text)) {
             return ctx.reply('Пожалуйста, введи дату рождения в формате ДД.ММ.ГГГГ');
@@ -49,6 +63,7 @@ bot.on('text', async (ctx) => {
         );
     }
 
+    // Выбор количества карт
     if (session.step === 'awaiting_cards_count') {
         const count = parseInt(text, 10);
         if (![1, 3, 5].includes(count)) {
@@ -60,6 +75,7 @@ bot.on('text', async (ctx) => {
         return ctx.reply('Хорошо! Теперь введи свой вопрос для расклада.');
     }
 
+    // Ввод вопроса
     if (session.step === 'awaiting_question') {
         const today = new Date().toISOString().split('T')[0];
 
@@ -70,14 +86,15 @@ bot.on('text', async (ctx) => {
         const question = text;
         const cards = drawCards(session.cardsCount || 3);
 
-        await saveUser(userId, { lastQuestionDate: today });
-        if (await alreadyAskedToday(userId)) {
-            return bot.sendMessage(chatId, "🔒 Сегодня ты уже спрашивал. Попробуй снова завтра.");
-        }
+        await saveUserQuestionDate(userId);
 
-        // Отправим сообщение о том, что идёт генерация
-        await bot.sendMessage(chatId, "🔮 Перемешиваю колоду и призываю силу карт...");
+        // Отправляем картинки карт
+        await sendCards(ctx, cards);
 
+        // Сообщение о генерации предсказания
+        await ctx.reply("🔮 Генерирую мистическое предсказание...");
+
+        // Генерация предсказания через OpenAI
         const prediction = await generateOpenAIPrediction({
             cards,
             question,
@@ -93,6 +110,7 @@ bot.on('text', async (ctx) => {
     return ctx.reply('Напиши /start, чтобы начать расклад.');
 });
 
+// Функция генерации предсказания через OpenAI
 async function generateOpenAIPrediction({ cards, question, birthdate }) {
     const cardsDescription = cards.map((card, i) =>
         `Карта ${i + 1}: ${card.name} — ${card.meaning}`
@@ -108,7 +126,7 @@ ${cardsDescription}
 
     try {
         const completion = await client.chat.completions.create({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: 'Сформируй утонченное и позитивное предсказание.' },
@@ -117,20 +135,13 @@ ${cardsDescription}
             temperature: 0.8,
         });
         return completion?.choices[0]?.message?.content.trim();
-
-        // if (answer) {
-        //     await bot.sendMessage(chatId, answer);
-        //     await saveUserQuestionDate(userId); // сохраняем дату
-        // } else {
-        //     await bot.sendMessage(chatId, "😕 Не удалось получить предсказание. Попробуй позже.");
-        // }
-
     } catch (err) {
         console.error('OpenAI error:', err);
         return generateFallbackPrediction({ cards, question, birthdate });
     }
 }
 
+// Резервное предсказание (если OpenAI не сработал)
 function generateFallbackPrediction({ cards, question, birthdate }) {
     const affirmations = [
         "Ты заслуживаешь покоя и ясности.",
@@ -146,13 +157,14 @@ function generateFallbackPrediction({ cards, question, birthdate }) {
     return `${intro}\n${cardLines}\n\n🔮 _${affirmation}_`;
 }
 
+// Запуск бота
 bot.launch();
 scheduleDaily(bot);
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
-// Экспортируем функции для scheduler.js
+// Экспорт функций для scheduler.js
 module.exports = {
     generateOpenAIPrediction,
     generateFallbackPrediction,

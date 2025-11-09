@@ -20,14 +20,17 @@ function saveDB() {
     fs.writeFileSync(DB_PATH, JSON.stringify(users, null, 2));
 }
 
+// Получение пользователя
 function getUser(userId) {
     return users[userId];
 }
 
+// Получение всех пользователей
 function getAllUsers() {
     return users;
 }
 
+// Сохранение/обновление данных пользователя
 async function saveUser(userId, data) {
     users[userId] = {
         ...users[userId],
@@ -35,6 +38,7 @@ async function saveUser(userId, data) {
     };
     saveDB();
 }
+
 /**
  * Проверяет, задавал ли пользователь вопрос сегодня
  * @param {string|number} userId
@@ -57,10 +61,35 @@ async function saveUserQuestionDate(userId) {
     const today = new Date().toISOString().slice(0, 10);
     await saveUser(userId, { lastQuestionDate: today });
 }
+
+/**
+ * Проверяет, отправлялся ли утренний расклад сегодня
+ * @param {string|number} userId
+ * @returns {boolean}
+ */
+function alreadySentDaily(userId) {
+    const user = getUser(userId);
+    if (!user || !user.lastDailyReadingDate) return false;
+
+    const today = new Date().toISOString().slice(0, 10);
+    return user.lastDailyReadingDate === today;
+}
+
+/**
+ * Сохраняет дату последнего утреннего расклада
+ * @param {string|number} userId
+ */
+async function markDailySent(userId) {
+    const today = new Date().toISOString().slice(0, 10);
+    await saveUser(userId, { lastDailyReadingDate: today });
+}
+
 module.exports = {
     getUser,
-    saveUser,
     getAllUsers,
+    saveUser,
     alreadyAskedToday,
     saveUserQuestionDate,
+    alreadySentDaily,
+    markDailySent,
 };
