@@ -12,7 +12,7 @@ const {
 } = require('./db');
 
 const { scheduleDaily } = require('./scheduler');
-const { generatePrediction, setBot } = require('./ai');
+const { generatePrediction, setBot } = require('./ai/index');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
