@@ -50,16 +50,30 @@ app.listen(PORT, () => {
 // =====================
 // HELPERS
 // =====================
-async function sendCards(ctx, cards) {
-    for (const card of cards) {
-        await ctx.telegram.sendPhoto(
-            ctx.chat.id,
-            card.image, // URL (raw.githubusercontent)
-            {
-                caption: `🃏 ${card.name}\n${card.meaning}`,
-            }
-        );
+
+// Отправка расклада в виде одной галереи и единого текста
+async function sendTarotSpread(ctx, cards, question, birthdate) {
+    // 1️⃣ Подготовим массив mediaGroup для галереи
+    const mediaGroup = cards.map(card => ({
+        type: 'photo',
+        media: card.image, // URL raw.githubusercontent или локальный путь
+        caption: `🃏 ${card.name}\n${card.meaning}`,
+    }));
+
+    if (mediaGroup.length > 1) {
+        await ctx.telegram.sendMediaGroup(ctx.chat.id, mediaGroup);
+    } else {
+        await ctx.telegram.sendPhoto(ctx.chat.id, mediaGroup[0].media, { caption: mediaGroup[0].caption });
     }
+
+    // 2️⃣ Генерация единого текста с предсказанием
+    const prediction = await generatePrediction(
+        { cards, question, birthdate },
+        { type: 'spread', userId: ctx.from.id }
+    );
+
+    // 3️⃣ Отправка предсказания
+    await ctx.reply(`✨ Твой расклад:\n\nТы спросила: *${question}*\n\n${prediction}`);
 }
 
 // =====================
@@ -67,10 +81,7 @@ async function sendCards(ctx, cards) {
 // =====================
 bot.start(async (ctx) => {
     sessions[ctx.from.id] = { step: 'birthdate' };
-
-    await ctx.reply(
-        'Привет ✨\nВведи свою дату рождения в формате ДД.ММ.ГГГГ'
-    );
+    await ctx.reply('Привет ✨\nВведи свою дату рождения в формате ДД.ММ.ГГГГ');
 });
 
 // =====================
@@ -97,7 +108,7 @@ bot.on('text', async (ctx) => {
         );
     }
 
-    // -------- выбор карт
+    // -------- выбор количества карт
     if (session.step === 'cards') {
         const count = Number(text);
         if (![1, 3, 5].includes(count)) {
@@ -121,14 +132,7 @@ bot.on('text', async (ctx) => {
         await saveUserQuestionDate(userId);
 
         await ctx.reply('🔮 Перемешиваю колоду...');
-        await sendCards(ctx, cards);
-
-        const prediction = await generatePrediction(
-            { cards, question, birthdate },
-            { type: 'question', userId }
-        );
-
-        await ctx.reply(`✨ Твой расклад:\n\n${prediction}`);
+        await sendTarotSpread(ctx, cards, question, birthdate);
 
         delete sessions[userId];
         return;
@@ -138,7 +142,7 @@ bot.on('text', async (ctx) => {
 });
 
 // =====================
-// LAUNCH
+// LAUNCH BOT
 // =====================
 bot.launch();
 scheduleDaily(bot);
