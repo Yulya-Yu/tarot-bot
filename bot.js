@@ -1,171 +1,121 @@
 const { Telegraf, Markup } = require('telegraf');
 const path = require('path');
-const { scheduleDaily } = require('./scheduler');
-const { getUser, saveUser, alreadyAskedToday, saveUserQuestionDate } = require('./db');
-const { drawCards } = require('./tarot');
-const { OpenAI } = require('openai');
 const dotenv = require('dotenv');
 dotenv.config();
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
-if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
+const { drawCards } = require('./tarot');
+const {
+    getUser,
+    saveUser,
+    alreadyAskedToday,
+    saveUserQuestionDate,
+} = require('./db');
 
-const client = new OpenAI({ apiKey: OPENAI_API_KEY });
+const { scheduleDaily } = require('./scheduler');
+const { generatePrediction, setBot } = require('./ai');
+
+const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
+
 const bot = new Telegraf(BOT_TOKEN);
+setBot(bot);
 
 const sessions = {};
 
-// Отправка карт с изображениями
+// =====================
+// ВСПОМОГАТЕЛЬНОЕ
+// =====================
 async function sendCards(ctx, cards) {
     for (const card of cards) {
         await ctx.telegram.sendPhoto(
             ctx.chat.id,
             { source: card.image },
-            { caption: `🃏 ${card.name}: ${card.meaning}` }
+            { caption: `🃏 ${card.name}\n${card.meaning}` }
         );
     }
 }
 
-// Стартовая команда
+// =====================
+// START
+// =====================
 bot.start(async (ctx) => {
+    sessions[ctx.from.id] = { step: 'birthdate' };
+
     await ctx.reply(
-        `Привет! Для начала, пожалуйста, введи свою дату рождения в формате ДД.ММ.ГГГГ.`
+        'Привет ✨\nВведи свою дату рождения в формате ДД.ММ.ГГГГ'
     );
-    sessions[ctx.from.id] = { step: 'awaiting_birthdate' };
 });
 
-// Основной обработчик текста
+// =====================
+// TEXT HANDLER
+// =====================
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
-    const chatId = ctx.chat.id;
-    const text = ctx.message.text.trim().slice(0, 200);
+    const text = ctx.message.text.trim();
     const user = getUser(userId) || {};
+    const session = sessions[userId] || {};
 
-    if (!sessions[userId]) sessions[userId] = {};
-    const session = sessions[userId];
-
-    // Ввод даты рождения
-    if (session.step === 'awaiting_birthdate') {
+    // -------- дата рождения
+    if (session.step === 'birthdate') {
         if (!/^\d{2}\.\d{2}\.\d{4}$/.test(text)) {
-            return ctx.reply('Пожалуйста, введи дату рождения в формате ДД.ММ.ГГГГ');
+            return ctx.reply('Формат неверный. Пример: 21.03.1994');
         }
-        session.birthdate = text;
+
         await saveUser(userId, { birthdate: text });
-        session.step = 'awaiting_cards_count';
+        sessions[userId] = { step: 'cards' };
 
         return ctx.reply(
-            'Отлично! Теперь выбери количество карт для расклада.',
-            Markup.keyboard([['1', '3', '5']])
-                .oneTime()
-                .resize(),
+            'Выбери количество карт 🃏',
+            Markup.keyboard([['1', '3', '5']]).resize().oneTime()
         );
     }
 
-    // Выбор количества карт
-    if (session.step === 'awaiting_cards_count') {
-        const count = parseInt(text, 10);
+    // -------- выбор карт
+    if (session.step === 'cards') {
+        const count = Number(text);
         if (![1, 3, 5].includes(count)) {
-            return ctx.reply('Пожалуйста, выбери количество карт из клавиатуры (1, 3 или 5).');
+            return ctx.reply('Выбери количество карт с клавиатуры.');
         }
-        session.cardsCount = count;
-        session.step = 'awaiting_question';
 
-        return ctx.reply('Хорошо! Теперь введи свой вопрос для расклада.');
+        sessions[userId] = { step: 'question', cardsCount: count };
+
+        return ctx.reply('Задай свой вопрос ✨');
     }
 
-    // Ввод вопроса
-    if (session.step === 'awaiting_question') {
-        const today = new Date().toISOString().split('T')[0];
-
-        if (user.lastQuestionDate === today) {
-            return ctx.reply('🕯️ Ты уже получил ответ на свой вопрос сегодня. Попробуй завтра.');
+    // -------- вопрос
+    if (session.step === 'question') {
+        if (await alreadyAskedToday(userId)) {
+            return ctx.reply('🕯️ Сегодня ты уже задавал вопрос. Попробуй завтра.');
         }
 
-        const question = text;
+        const question = text.slice(0, 200);
         const cards = drawCards(session.cardsCount || 3);
+        const birthdate = user.birthdate;
 
         await saveUserQuestionDate(userId);
 
-        // Отправляем картинки карт
+        await ctx.reply('🔮 Перемешиваю колоду...');
         await sendCards(ctx, cards);
 
-        // Сообщение о генерации предсказания
-        await ctx.reply("🔮 Генерирую мистическое предсказание...");
+        const prediction = await generatePrediction(
+            { cards, question, birthdate },
+            { type: 'question', userId }
+        );
 
-        // Генерация предсказания через OpenAI
-        const prediction = await generateOpenAIPrediction({
-            cards,
-            question,
-            birthdate: user.birthdate || session.birthdate,
-        });
-
-        await ctx.reply(`🔮 Твой расклад:\n\n${prediction}`);
+        await ctx.reply(`✨ Твой расклад:\n\n${prediction}`);
 
         delete sessions[userId];
         return;
     }
 
-    return ctx.reply('Напиши /start, чтобы начать расклад.');
+    return ctx.reply('Напиши /start, чтобы начать заново.');
 });
 
-// Функция генерации предсказания через OpenAI
-async function generateOpenAIPrediction({ cards, question, birthdate }) {
-    const cardsDescription = cards.map((card, i) =>
-        `Карта ${i + 1}: ${card.name} — ${card.meaning}`
-    ).join('\n');
-
-    const systemPrompt = `
-Ты — мистический советчик. Дай позитивное, вдохновляющее, мистическое толкование расклада на Таро с акцентом на аффирмации и заботу о себе.
-Дата рождения пользователя: ${birthdate}
-Вопрос пользователя: ${question}
-Карты:
-${cardsDescription}
-`;
-
-    try {
-        const completion = await client.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: 'Сформируй утонченное и позитивное предсказание.' },
-            ],
-            max_tokens: 300,
-            temperature: 0.8,
-        });
-        return completion?.choices[0]?.message?.content.trim();
-    } catch (err) {
-        console.error('OpenAI error:', err);
-        return generateFallbackPrediction({ cards, question, birthdate });
-    }
-}
-
-// Резервное предсказание (если OpenAI не сработал)
-function generateFallbackPrediction({ cards, question, birthdate }) {
-    const affirmations = [
-        "Ты заслуживаешь покоя и ясности.",
-        "Сегодня твоя душа раскроется навстречу свету.",
-        "Будущее открыто перед тобой — просто сделай шаг.",
-        "Ты сильнее, чем кажешься, и мудрее, чем думаешь.",
-    ];
-
-    const intro = `✨ Твоя душа задала вопрос: *${question}*.\nКарты выбраны с учётом твоего пути.\n`;
-    const cardLines = cards.map(card => `🃏 *${card.name}*: ${card.meaning}`).join('\n');
-    const affirmation = affirmations[Math.floor(Math.random() * affirmations.length)];
-
-    return `${intro}\n${cardLines}\n\n🔮 _${affirmation}_`;
-}
-
-// Запуск бота
+// =====================
+// START BOT
+// =====================
 bot.launch();
 scheduleDaily(bot);
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-// Экспорт функций для scheduler.js
-module.exports = {
-    generateOpenAIPrediction,
-    generateFallbackPrediction,
-};
