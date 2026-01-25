@@ -2,6 +2,7 @@ const { Telegraf, Markup } = require('telegraf');
 const path = require('path');
 const dotenv = require('dotenv');
 const express = require('express');
+const schedule = require('node-schedule');
 
 dotenv.config();
 
@@ -16,17 +17,15 @@ const {
     saveUserQuestionDate,
 } = require('./db');
 const { scheduleDaily } = require('./scheduler');
-const { generatePrediction, setBot } = require('./ai/index');
+const { generatePrediction, setBot, alertAdmin } = require('./ai/index');
 
 // =====================
 // ENV
 // =====================
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const WEBHOOK_PATH = `/bot${BOT_TOKEN}`;
-const PORT = process.env.PORT || 3000;
-const APP_URL = process.env.APP_URL; // URL приложения на Render
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
-if (!APP_URL) throw new Error('APP_URL is required for webhook mode');
+
+const CHANNEL_ID = process.env.CHANNEL_ID; // для ежедневного поста в канал
 
 // =====================
 // BOT INIT
@@ -40,23 +39,14 @@ const sessions = {};
 // EXPRESS SERVER (ДЛЯ RENDER)
 // =====================
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-
-// Главная страница
 app.get('/', (req, res) => {
     res.send('✨ Tarot bot is alive');
 });
 
-// Telegram webhook
-app.use(bot.webhookCallback(WEBHOOK_PATH));
-
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
     console.log(`🌐 Web server running on port ${PORT}`);
-
-    // Настройка webhook
-    await bot.telegram.setWebhook(`${APP_URL}${WEBHOOK_PATH}`);
-    console.log(`Webhook set to ${APP_URL}${WEBHOOK_PATH}`);
 });
 
 // =====================
@@ -64,17 +54,22 @@ app.listen(PORT, async () => {
 // =====================
 
 // Отправка медиагруппы без caption
-async function sendCardsMediaGroup(ctx, cards) {
+async function sendCardsMediaGroup(ctxOrChatId, cards) {
     const media = cards.map(c => ({ type: 'photo', media: c.image }));
-    await ctx.telegram.sendMediaGroup(ctx.chat.id, media);
+    await bot.telegram.sendMediaGroup(ctxOrChatId, media);
 }
 
-// Форматируем текст: карты + общее предсказание
+// Экранируем спецсимволы для MarkdownV2
+function escapeMarkdownV2(text) {
+    return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
+// Форматируем текст с картами и общим предсказанием
 function formatCardsText(cards, generalPrediction, question) {
     const lines = cards
-        .map(c => `🃏 ${c.name} — ${c.meaning}`)
+        .map(c => `🃏 *${escapeMarkdownV2(c.name)}* — ${escapeMarkdownV2(c.meaning)}`)
         .join('\n');
-    return `✨ Ты спросила: ${question}\n\n${lines}\n\n🔮 ${generalPrediction}`;
+    return `✨ Ты спросила: *${escapeMarkdownV2(question)}*\n\n${lines}\n\n🔮 ${escapeMarkdownV2(generalPrediction)}\n\n_Ответ уже внутри тебя._`;
 }
 
 // =====================
@@ -82,7 +77,6 @@ function formatCardsText(cards, generalPrediction, question) {
 // =====================
 bot.start(async (ctx) => {
     sessions[ctx.from.id] = { step: 'birthdate' };
-
     await ctx.reply(
         'Привет ✨\nВведи свою дату рождения в формате ДД.ММ.ГГГГ'
     );
@@ -135,18 +129,27 @@ bot.on('text', async (ctx) => {
 
         await saveUserQuestionDate(userId);
 
+        await ctx.reply('🔮 Перемешиваю колоду...');
+
         // 1️⃣ Отправляем медиагруппу без caption
-        await sendCardsMediaGroup(ctx, cards);
+        await sendCardsMediaGroup(ctx.chat.id, cards);
 
         // 2️⃣ Генерируем общее предсказание через AI
-        const generalPrediction = await generatePrediction(
-            { cards, question, birthdate },
-            { type: 'question', userId },
-        );
+        let generalPrediction = '✨ Сегодня день будет особенным.';
+        try {
+            const aiResult = await generatePrediction(
+                { cards, question, birthdate },
+                { type: 'question', userId }
+            );
+            if (typeof aiResult === 'string') generalPrediction = aiResult;
+        } catch (err) {
+            console.error('AI prediction failed:', err.message);
+            await alertAdmin(`AI prediction failed for user ${userId}: ${err.message}`);
+        }
 
         // 3️⃣ Формируем текст с толкованием карт + общее предсказание
         const textMessage = formatCardsText(cards, generalPrediction, question);
-        await ctx.reply(textMessage);
+        await ctx.replyWithMarkdownV2(textMessage);
 
         delete sessions[userId];
         return;
@@ -156,9 +159,56 @@ bot.on('text', async (ctx) => {
 });
 
 // =====================
-// DAILY SCHEDULE
+// ЕЖЕДНЕВНЫЙ РАСКЛАД В КАНАЛ
 // =====================
-scheduleDaily(bot);
+async function sendDailyPrediction() {
+    if (!CHANNEL_ID) return console.warn('CHANNEL_ID не задан');
+
+    const cards = drawCards(3);
+    let generalPrediction = '✨ Сегодня день будет особенным.';
+    try {
+        const aiResult = await generatePrediction(
+            { cards, question: 'Общее предсказание дня', birthdate: null },
+            { type: 'daily', userId: 'channel' }
+        );
+        if (typeof aiResult === 'string') generalPrediction = aiResult;
+    } catch (err) {
+        console.error('AI daily prediction failed:', err.message);
+        await alertAdmin(`AI daily prediction failed: ${err.message}`);
+    }
+
+    try {
+        await sendCardsMediaGroup(CHANNEL_ID, cards);
+    } catch (err) {
+        console.error('Failed to send daily media group:', err.message);
+    }
+
+    const text = cards
+        .map(c => `🃏 *${escapeMarkdownV2(c.name)}* — ${escapeMarkdownV2(c.meaning)}`)
+        .join('\n');
+    const message = `✨ Общее предсказание дня:\n\n${text}\n\n🔮 ${escapeMarkdownV2(generalPrediction)}\n\n_Ответ уже внутри тебя._`;
+
+    try {
+        await bot.telegram.sendMessage(CHANNEL_ID, message, { parse_mode: 'MarkdownV2' });
+    } catch (err) {
+        console.error('Failed to send daily text message:', err.message);
+    }
+}
+
+// Планируем отправку каждый день в 9:00 утра
+schedule.scheduleJob('0 9 * * *', () => {
+    console.log('🔔 Отправка ежедневного расклада в канал');
+    sendDailyPrediction();
+});
+
+// =====================
+// LAUNCH
+// =====================
+bot.launch()
+    .then(() => console.log('🤖 Bot started'))
+    .catch(err => console.error('Bot launch failed:', err));
+
+scheduleDaily(bot); // оставляем, если нужны ежедневные личные уведомления
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
