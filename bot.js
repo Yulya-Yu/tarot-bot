@@ -5,9 +5,6 @@ const express = require('express');
 
 dotenv.config();
 
-// =====================
-// IMPORTS
-// =====================
 const { drawCards } = require('./tarot');
 const {
     getUser,
@@ -19,9 +16,6 @@ const {
 const { scheduleDaily } = require('./scheduler');
 const { generatePrediction, setBot } = require('./ai/index');
 
-// =====================
-// ENV
-// =====================
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
 
@@ -34,46 +28,26 @@ setBot(bot);
 const sessions = {};
 
 // =====================
-// EXPRESS SERVER (ДЛЯ RENDER)
+// EXPRESS SERVER (для Render)
 // =====================
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-app.get('/', (req, res) => {
-    res.send('✨ Tarot bot is alive');
-});
-
-app.listen(PORT, () => {
-    console.log(`🌐 Web server running on port ${PORT}`);
-});
+app.get('/', (req, res) => res.send('✨ Tarot bot is alive'));
+app.listen(PORT, () => console.log(`🌐 Web server running on port ${PORT}`));
 
 // =====================
 // HELPERS
 // =====================
 
-// Отправка расклада в виде одной галереи и единого текста
-async function sendTarotSpread(ctx, cards, question, birthdate) {
-    // 1️⃣ Подготовим массив mediaGroup для галереи
-    const mediaGroup = cards.map(card => ({
+// Отправка карт как медиагруппы с общим предсказанием
+async function sendCardsGallery(ctx, cards, predictionText) {
+    const media = cards.map((c, i) => ({
         type: 'photo',
-        media: card.image, // URL raw.githubusercontent или локальный путь
-        caption: `🃏 ${card.name}\n${card.meaning}`,
+        media: c.image, // здесь URL raw.githubusercontent
+        caption: i === 0 ? `🔮 Твой расклад:\n\n${predictionText}` : `${c.name}: ${c.meaning}`,
     }));
 
-    if (mediaGroup.length > 1) {
-        await ctx.telegram.sendMediaGroup(ctx.chat.id, mediaGroup);
-    } else {
-        await ctx.telegram.sendPhoto(ctx.chat.id, mediaGroup[0].media, { caption: mediaGroup[0].caption });
-    }
-
-    // 2️⃣ Генерация единого текста с предсказанием
-    const prediction = await generatePrediction(
-        { cards, question, birthdate },
-        { type: 'spread', userId: ctx.from.id }
-    );
-
-    // 3️⃣ Отправка предсказания
-    await ctx.reply(`✨ Твой расклад:\n\nТы спросила: *${question}*\n\n${prediction}`);
+    await ctx.telegram.sendMediaGroup(ctx.chat.id, media);
 }
 
 // =====================
@@ -131,8 +105,14 @@ bot.on('text', async (ctx) => {
 
         await saveUserQuestionDate(userId);
 
-        await ctx.reply('🔮 Перемешиваю колоду...');
-        await sendTarotSpread(ctx, cards, question, birthdate);
+        // -------- формируем общее предсказание через ИИ
+        const prediction = await generatePrediction(
+            { cards, question, birthdate },
+            { type: 'question', userId }
+        );
+
+        // -------- отправка галереи карт с подписью
+        await sendCardsGallery(ctx, cards, prediction);
 
         delete sessions[userId];
         return;
