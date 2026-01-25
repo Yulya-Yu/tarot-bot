@@ -1,31 +1,25 @@
-const { OpenAI } = require("openai");
-
-const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+const OpenAI = require('openai');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function generate({ cards, question, birthdate }) {
-    const cardsText = cards
-        .map((c, i) => `Карта ${i + 1}: ${c.name} — ${c.meaning}`)
-        .join('\n');
+    if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not set');
 
-    const prompt = `
-Ты — мистический таролог.
-Дай позитивное, поддерживающее предсказание.
+    const cardsText = cards.map(c => `${c.name}: ${c.meaning}`).join('; ');
+    const prompt = `Ты таролог. Пользователь задает вопрос: "${question}". Дата рождения: ${birthdate}. Карты: ${cardsText}. Дай краткое, позитивное, поддеривающее предсказание на основе этих карт.`;
 
-Дата рождения: ${birthdate}
-Вопрос: ${question}
-
-Карты:
-${cardsText}
-`;
-
-    const res = await client.responses.create({
-        model: "gpt-4o-mini",
-        input: prompt,
+    const response = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+            { role: 'system', content: 'Ты таролог. Отвечай позитивно и ясно.' },
+            { role: 'user', content: prompt }
+        ],
+        max_tokens: 200,
     });
 
-    return res.output_text.trim();
+    const text = response.choices?.[0]?.message?.content;
+    if (!text) throw new Error('Invalid response from OpenAI');
+
+    return text.trim();
 }
 
 module.exports = { generate };

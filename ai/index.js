@@ -1,14 +1,20 @@
 const gemini = require('./gemini');
 const openai = require('./openai');
-const fallback = require('./fallback');
+const fallback = require('./fallback'); // твой старый генератор по умолчанию
 const logger = require('../logger');
 
 let botInstance = null;
 
+// =====================
+// Привязка бота для алертов
+// =====================
 function setBot(bot) {
     botInstance = bot;
 }
 
+// =====================
+// Отправка алерта администратору
+// =====================
 async function alertAdmin(text) {
     if (!botInstance || !process.env.ADMIN_TELEGRAM_ID) return;
     try {
@@ -21,35 +27,13 @@ async function alertAdmin(text) {
     }
 }
 
-/**
- * Генерация общего предсказания для нескольких карт
- * @param {Object} data - { cards, question, birthdate }
- * @param {Object} meta - { type, userId }
- * @returns {string} - текст предсказания
- */
+// =====================
+// Генерация предсказания
+// =====================
 async function generatePrediction(data, meta = {}) {
-    const { cards, question, birthdate } = data;
-
-    // Формируем текст для ИИ, чтобы он дал одно общее предсказание
-    const cardsDescription = cards
-        .map(c => `Карта: ${c.name} — ${c.meaning}`)
-        .join('\n');
-
-    const prompt = `
-Ты — мистический таро-консультант.
-Составь **один связный, вдохновляющий и позитивный прогноз** для пользователя.
-У пользователя дата рождения: ${birthdate}
-Вопрос: ${question}
-Карты:
-${cardsDescription}
-
-Ответ должен быть в одном блоке текста, включать общую интерпретацию всех карт, 
-коротко упоминать их значения, и завершаться позитивной аффирмацией.
-`;
-
-    // Попытка 1 — Gemini
+    // Попробуем Gemini
     try {
-        const res = await gemini.generate({ prompt });
+        const res = await gemini.generate(data);
         logger.info(`AI=gemini | type=${meta.type}`);
         return res;
     } catch (e) {
@@ -59,9 +43,9 @@ ${cardsDescription}
         );
     }
 
-    // Попытка 2 — OpenAI
+    // Попробуем OpenAI
     try {
-        const res = await openai.generate({ prompt });
+        const res = await openai.generate(data);
         logger.info(`AI=openai | type=${meta.type}`);
         return res;
     } catch (e) {
@@ -71,15 +55,16 @@ ${cardsDescription}
         );
     }
 
-    // Попытка 3 — fallback
+    // Если оба ИИ упали, используем fallback
     logger.warn(`AI=fallback | type=${meta.type}`);
     await alertAdmin(
         `Fallback used\nType: ${meta.type}\nUser: ${meta.userId}`
     );
+
     return fallback.generate(data);
 }
 
 module.exports = {
-    generatePrediction,
     setBot,
+    generatePrediction,
 };

@@ -1,27 +1,34 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const fetch = require('node-fetch');
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 async function generate({ cards, question, birthdate }) {
-    const cardsText = cards
-        .map((c, i) => `Карта ${i + 1}: ${c.name} — ${c.meaning}`)
-        .join('\n');
+    if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not set');
 
-    const prompt = `
-Ты — мистический таролог.
-Пиши мягко, позитивно, образно.
-Без негатива и фатализма.
+    // Формируем текстовый prompt
+    const cardsText = cards.map(c => `${c.name}: ${c.meaning}`).join('; ');
+    const prompt = `Ты таролог. Пользователь задает вопрос: "${question}". Дата рождения: ${birthdate}. Карты: ${cardsText}. Составь короткое, ясное предсказание на основе этих карт.`;
 
-Дата рождения: ${birthdate}
-Вопрос: ${question}
+    const response = await fetch('https://api.gemini.com/v1/generate', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${GEMINI_API_KEY}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            prompt,
+            max_tokens: 200,
+        }),
+    });
 
-Карты:
-${cardsText}
-`;
+    const data = await response.json();
 
-    const result = await model.generateContent(prompt);
-    return result.response.text().trim();
+    // В зависимости от ответа Gemini
+    if (!data || !data.text) {
+        throw new Error('Invalid response from Gemini');
+    }
+
+    return data.text.trim();
 }
 
 module.exports = { generate };
