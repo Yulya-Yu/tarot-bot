@@ -56,10 +56,16 @@ async function sendCardsMediaGroup(ctx, cards) {
     await ctx.telegram.sendMediaGroup(ctx.chat.id, media);
 }
 
-// Формирование текста с толкованием каждой карты + общее предсказание
+// Экранируем все спецсимволы для MarkdownV2
+function escapeMarkdownV2(text) {
+    return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
 function formatCardsText(cards, generalPrediction, question) {
-    const lines = cards.map(c => `🃏 *${c.name}* — ${c.meaning}`).join('\n');
-    return `✨ Ты спросила: *${question}*\n\n${lines}\n\n🔮 ${generalPrediction}`;
+    const lines = cards
+        .map(c => `🃏 *${escapeMarkdownV2(c.name)}* — ${escapeMarkdownV2(c.meaning)}`)
+        .join('\n');
+    return `✨ Ты спросила: *${escapeMarkdownV2(question)}*\n\n${lines}\n\n🔮 ${escapeMarkdownV2(generalPrediction)}`;
 }
 
 // =====================
@@ -128,7 +134,7 @@ bot.on('text', async (ctx) => {
         // 2️⃣ Генерируем общее предсказание через AI
         const generalPrediction = await generatePrediction(
             { cards, question, birthdate },
-            { type: 'question', userId }
+            { type: 'question', userId },
         );
 
         // 3️⃣ Формируем текст с толкованием карт + общее предсказание
