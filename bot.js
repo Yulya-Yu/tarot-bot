@@ -1,8 +1,13 @@
 const { Telegraf, Markup } = require('telegraf');
 const path = require('path');
 const dotenv = require('dotenv');
+const express = require('express');
+
 dotenv.config();
 
+// =====================
+// IMPORTS
+// =====================
 const { drawCards } = require('./tarot');
 const {
     getUser,
@@ -14,29 +19,51 @@ const {
 const { scheduleDaily } = require('./scheduler');
 const { generatePrediction, setBot } = require('./ai/index');
 
+// =====================
+// ENV
+// =====================
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
 
+// =====================
+// BOT INIT
+// =====================
 const bot = new Telegraf(BOT_TOKEN);
 setBot(bot);
 
 const sessions = {};
 
 // =====================
-// ВСПОМОГАТЕЛЬНОЕ
+// EXPRESS SERVER (ДЛЯ RENDER)
+// =====================
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('✨ Tarot bot is alive');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 Web server running on port ${PORT}`);
+});
+
+// =====================
+// HELPERS
 // =====================
 async function sendCards(ctx, cards) {
     for (const card of cards) {
         await ctx.telegram.sendPhoto(
             ctx.chat.id,
-            { source: card.image },
-            { caption: `🃏 ${card.name}\n${card.meaning}` }
+            card.image, // URL (raw.githubusercontent)
+            {
+                caption: `🃏 ${card.name}\n${card.meaning}`,
+            }
         );
     }
 }
 
 // =====================
-// START
+// START COMMAND
 // =====================
 bot.start(async (ctx) => {
     sessions[ctx.from.id] = { step: 'birthdate' };
@@ -78,7 +105,6 @@ bot.on('text', async (ctx) => {
         }
 
         sessions[userId] = { step: 'question', cardsCount: count };
-
         return ctx.reply('Задай свой вопрос ✨');
     }
 
@@ -112,7 +138,7 @@ bot.on('text', async (ctx) => {
 });
 
 // =====================
-// START BOT
+// LAUNCH
 // =====================
 bot.launch();
 scheduleDaily(bot);
