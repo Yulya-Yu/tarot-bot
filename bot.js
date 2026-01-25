@@ -22,7 +22,11 @@ const { generatePrediction, setBot } = require('./ai/index');
 // ENV
 // =====================
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const WEBHOOK_PATH = `/bot${BOT_TOKEN}`;
+const PORT = process.env.PORT || 3000;
+const APP_URL = process.env.APP_URL; // URL приложения на Render
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required');
+if (!APP_URL) throw new Error('APP_URL is required for webhook mode');
 
 // =====================
 // BOT INIT
@@ -36,14 +40,23 @@ const sessions = {};
 // EXPRESS SERVER (ДЛЯ RENDER)
 // =====================
 const app = express();
-const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
+
+// Главная страница
 app.get('/', (req, res) => {
     res.send('✨ Tarot bot is alive');
 });
 
-app.listen(PORT, () => {
+// Telegram webhook
+app.use(bot.webhookCallback(WEBHOOK_PATH));
+
+app.listen(PORT, async () => {
     console.log(`🌐 Web server running on port ${PORT}`);
+
+    // Настройка webhook
+    await bot.telegram.setWebhook(`${APP_URL}${WEBHOOK_PATH}`);
+    console.log(`Webhook set to ${APP_URL}${WEBHOOK_PATH}`);
 });
 
 // =====================
@@ -56,18 +69,12 @@ async function sendCardsMediaGroup(ctx, cards) {
     await ctx.telegram.sendMediaGroup(ctx.chat.id, media);
 }
 
-// Экранируем все спецсимволы для MarkdownV2
-function escapeMarkdownV2(text) {
-    if (!text) return '';
-    return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
-}
-
-// Формируем текст с толкованием карт и общим предсказанием
+// Форматируем текст: карты + общее предсказание
 function formatCardsText(cards, generalPrediction, question) {
     const lines = cards
-        .map(c => `🃏 *${escapeMarkdownV2(c.name)}* — ${escapeMarkdownV2(c.meaning)}`)
+        .map(c => `🃏 ${c.name} — ${c.meaning}`)
         .join('\n');
-    return `✨ Ты спросила: *${escapeMarkdownV2(question)}*\n\n${lines}\n\n🔮 ${escapeMarkdownV2(generalPrediction)}`;
+    return `✨ Ты спросила: ${question}\n\n${lines}\n\n🔮 ${generalPrediction}`;
 }
 
 // =====================
@@ -128,27 +135,18 @@ bot.on('text', async (ctx) => {
 
         await saveUserQuestionDate(userId);
 
-        await ctx.reply('🔮 Перемешиваю колоду...');
-
-        // 1️⃣ Отправляем медиагруппу карт без caption
+        // 1️⃣ Отправляем медиагруппу без caption
         await sendCardsMediaGroup(ctx, cards);
 
         // 2️⃣ Генерируем общее предсказание через AI
-        let generalPrediction = '';
-        try {
-            generalPrediction = await generatePrediction(
-                { cards, question, birthdate },
-                { type: 'question', userId }
-            );
-        } catch (e) {
-            generalPrediction = '✨ Сегодня день будет обычным, без особых предзнаменований.';
-        }
+        const generalPrediction = await generatePrediction(
+            { cards, question, birthdate },
+            { type: 'question', userId },
+        );
 
         // 3️⃣ Формируем текст с толкованием карт + общее предсказание
         const textMessage = formatCardsText(cards, generalPrediction, question);
-
-        // 4️⃣ Отправляем одно безопасное сообщение MarkdownV2
-        await ctx.replyWithMarkdownV2(textMessage);
+        await ctx.reply(textMessage);
 
         delete sessions[userId];
         return;
@@ -158,9 +156,8 @@ bot.on('text', async (ctx) => {
 });
 
 // =====================
-// LAUNCH
+// DAILY SCHEDULE
 // =====================
-bot.launch();
 scheduleDaily(bot);
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
