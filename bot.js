@@ -125,9 +125,9 @@ bot.on('text', async (ctx) => {
 
     // -------- вопрос
     if (session.step === 'question') {
-        if (await alreadyAskedToday(userId)) {
-            return ctx.reply('🕯️ Сегодня ты уже задавал вопрос. Попробуй завтра.');
-        }
+        // if (await alreadyAskedToday(userId)) {
+        //     return ctx.reply('🕯️ Сегодня ты уже задавал вопрос. Попробуй завтра.');
+        // }
 
         const question = text.slice(0, 200);
         const cards = drawCards(session.cardsCount || 3);
