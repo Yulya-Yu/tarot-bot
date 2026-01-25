@@ -58,9 +58,11 @@ async function sendCardsMediaGroup(ctx, cards) {
 
 // Экранируем все спецсимволы для MarkdownV2
 function escapeMarkdownV2(text) {
+    if (!text) return '';
     return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
 }
 
+// Формируем текст с толкованием карт и общим предсказанием
 function formatCardsText(cards, generalPrediction, question) {
     const lines = cards
         .map(c => `🃏 *${escapeMarkdownV2(c.name)}* — ${escapeMarkdownV2(c.meaning)}`)
@@ -132,13 +134,20 @@ bot.on('text', async (ctx) => {
         await sendCardsMediaGroup(ctx, cards);
 
         // 2️⃣ Генерируем общее предсказание через AI
-        const generalPrediction = await generatePrediction(
-            { cards, question, birthdate },
-            { type: 'question', userId },
-        );
+        let generalPrediction = '';
+        try {
+            generalPrediction = await generatePrediction(
+                { cards, question, birthdate },
+                { type: 'question', userId }
+            );
+        } catch (e) {
+            generalPrediction = '✨ Сегодня день будет обычным, без особых предзнаменований.';
+        }
 
         // 3️⃣ Формируем текст с толкованием карт + общее предсказание
         const textMessage = formatCardsText(cards, generalPrediction, question);
+
+        // 4️⃣ Отправляем одно безопасное сообщение MarkdownV2
         await ctx.replyWithMarkdownV2(textMessage);
 
         delete sessions[userId];
