@@ -1,5 +1,6 @@
 const gemini = require('./gemini');
 const openai = require('./openai');
+const deepseek = require('./deepseek');
 const fallback = require('./fallback'); // твой старый генератор по умолчанию
 const logger = require('../logger');
 
@@ -31,6 +32,14 @@ async function alertAdmin(text) {
 // Генерация предсказания
 // =====================
 async function generatePrediction(data, meta = {}) {
+    try {
+        const res = await deepseek.generate(data);
+        logger.info(`AI=deepseek | type=${meta.type}`);
+        return res;
+    } catch (e) {
+        logger.warn(`DeepSeek failed: ${e.message}`);
+        await alertAdmin(`DeepSeek failed\n${e.message}`);
+    }
     // Попробуем Gemini
     try {
         const res = await gemini.generate(data);
