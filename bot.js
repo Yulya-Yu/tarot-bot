@@ -66,10 +66,16 @@ function escapeMarkdownV2(text) {
 
 // Форматируем текст с картами и общим предсказанием
 function formatCardsText(cards, generalPrediction, question) {
-    const lines = cards
-        .map(c => `🃏 *${escapeMarkdownV2(c.name)}* — ${escapeMarkdownV2(c.meaning)}`)
-        .join('\n');
-    return `✨ Ты спросила: *${escapeMarkdownV2(question)}*\n\n${lines}\n\n🔮 ${escapeMarkdownV2(generalPrediction)}\n\n_Ответ уже внутри тебя._`;
+    const rawText =
+        `✨ Ты спросила: ${question}
+
+${cards.map(c => `🃏 ${c.name} — ${c.meaning}`).join('\n')}
+
+🔮 ${generalPrediction}
+
+Ответ уже внутри тебя.`;
+
+    return escapeMarkdownV2(rawText);
 }
 
 // =====================
@@ -149,7 +155,7 @@ bot.on('text', async (ctx) => {
 
         // 3️⃣ Формируем текст с толкованием карт + общее предсказание
         const textMessage = formatCardsText(cards, generalPrediction, question);
-        await ctx.replyWithMarkdownV2(textMessage);
+        await ctx.reply(textMessage, { parse_mode: 'MarkdownV2' });
 
         delete sessions[userId];
         return;
